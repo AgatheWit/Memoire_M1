@@ -1,0 +1,582 @@
+---
+title: "Primes sans chargement - Tables du moment TD-TV 88-90"
+author: "Agathe Wittoeck"
+date: "2022-2023"
+header-includes:
+   - \usepackage{pifont} 
+   - \usepackage{manfnt}
+   - \usepackage{mdframed}
+   - \usepackage{systeme}
+   - \usepackage{txfonts}
+   - \newcommand{\cH}{\mathcal{H}}
+---
+
+
+\vspace{5cm}
+\begin{center}
+\begin{Large}
+\underline{Formateur} :
+\vspace{2cm}
+\end{Large}
+\end{center}
+
+\newpage
+
+#Packages
+
+```{r ,message=FALSE}
+library(readxl)
+```
+
+#On se place dans le bon 'Working Directory' et on vide notre environnement 
+```{r}
+rm(list=ls())
+setwd("~/Documents/Dauphine M1/Mémoire")
+```
+
+#Calcul des primes uniques et annuelle, version sans chargement 
+
+Nous pouvons désormais appliquer nos formules en utilisant d'autres tables de mortalité, les tables TD88-90 et TV88-90. Ces différentes tables ont été mises en place par l'INSEE en étudiant la population de 1988 à 1990. La table TD88-90 était utilisée dans le cadre de contrats d'assurance décès et se base sur l'étude d'une population d'hommes. La table TV88-90 était utilisée dans le cadre de contrats d'assurance vie et se base sur l'étude d'une population de femmes. Elles constituent en quelques sortes les ancêtres des tables TH et TF utilisées auparavant. \\
+Nous utiliserons la table TV88-90 pour étudier un individu féminin, et la table TD88-90 pour étudier un individu masculin. 
+```{r}
+table_TD_TV<-read_excel("TDTV88-90.xls", sheet = 1)
+matrice_TD_TV<-as.matrix(table_TD_TV[2:112,2:3])#on supprime les titres et la colonne des ages
+TD<-as.integer(matrice_TD_TV[,1]) #homme 
+TD[108:111]<-c(0,0,0,0)
+TV<-as.integer(matrice_TD_TV[,2]) #femme
+```
+Nous pouvons dès à présent appliquer les mêmes codes à ces nouvelles tables. 
+
+#Calcul des primes uniques et annuelle, version sans chargement 
+
+Pour toutes les primes qui vont être adressées ici, nous allons successivement faire varier l'âge des crédirentiers et débirentiers et déterminer les primes pour les différents âges étudiés. 
+Commençons par créer un vecteur regroupant tous les âges des crédirentiers que nous voulons étudier, lorsque nous faisons varier l'âge du crédirentier. 
+```{r}
+age<-seq(60,100,5)
+annee_naissance<-2022-age
+l<-length(age)
+omega<-length(TD)-1 #âge final
+```
+
+##Calcul des espérances résiduelles 
+
+Rappelons la formule utilisée pour les différentes tables de mortalité:
+\[
+E[T_x]= \sum_{k=1}^{\omega-x}~_kp_x
+\]
+Nous réutilisons alors le code utilisé pour la détermination de l'espérance en se basant sur des tables générationnelles. 
+```{r}
+esperance<-function(age,table){
+  esp<-apply(matrix(seq(1,length(age)), nrow=length(age)),1, function(x) sum(table[(age[x]+2):length(table)])/table[age[x]+1])
+  return(esp)
+}
+```
+On peut désormais déterminer l'espérance résiduelle des individus dont les âges sont compris dans le vecteur 'age':\\
+```{r}
+esp_femme<-esperance(age,TV) #espérances pour les femmes 
+esp_homme<-esperance(age,TD) #espérances pour les hommes
+```
+##Calcul du DUH et de la Rente
+
+On se place dans le cadre d'un bien de valeur vénale de 500 000€ et de loyer de 15 000€. On suppose également que le bien est intégralement payé sous forme de rente (il n'y a pas de bouquet).
+```{r}
+Loyer=15000
+```
+
+###Calcul sur une tête
+```{r}
+#Détermination du DUH 
+v<-1/(1+0.02)
+
+DUH_1_H<-function(x){
+  actualisation<-cumprod(rep(v,omega-age[x]))
+  probas_survie_homme<-TD[(age[x]+2):(omega+1)]/TD[(age[x]+1)]
+  return(sum(actualisation*probas_survie_homme)*Loyer)
+}
+
+DUH_1_F<-function(x){
+  actualisation<-cumprod(rep(v,omega-age[x]))
+  probas_survie_femme<-TV[(age[x]+2):(omega+1)]/TV[(age[x]+1)]
+  return(sum(actualisation*probas_survie_femme)*Loyer)
+}
+
+#Détermination de la rente
+
+Rente_1_H<-function(x){
+  Capital_1_homme<-500000-DUH_1_H(x)
+  actualisation<-cumprod(c(1,rep(v,omega-age[x])))
+  probas_survie_homme<-TD[(age[x]+1):(omega+1)]/TD[(age[x]+1)]
+  return(Capital_1_homme/sum(actualisation*probas_survie_homme))
+}
+
+Rente_1_F<-function(x){
+  Capital_1_femme<-500000-DUH_1_F(x)
+  actualisation<-cumprod(c(1,rep(v,omega-age[x])))
+  probas_survie_femme<-TV[(age[x]+1):(omega+1)]/TV[(age[x]+1)]
+  return(Capital_1_femme/sum(actualisation*probas_survie_femme))
+}
+
+Rente_1_homme<-apply(matrix(seq(1:length(age)), nrow=length(age)), 1, Rente_1_H)
+Rente_1_femme<-apply(matrix(seq(1:length(age)), nrow=length(age)), 1, Rente_1_F)
+
+```
+
+###Calcul sur deux têtes 
+```{r}
+DUH_2_T<-function(x_1,x_2){ #attention x_1 et x_2 ne représentent pas les âges mais la position de l'âge des individus considérés dans le vecteur 'age'
+  x<-min(x_1,x_2)
+  actualisation<-cumprod(rep(v,omega-age[x]))
+  if(x_1>x_2){
+    probas_survie_homme<-c(TD[(age[x_1]+2):(omega+1)]/TD[(age[x_1]+1)],rep(0,age[x_1]-age[x_2]))
+    probas_survie_femme<-TV[(age[x_2]+2):(omega+1)]/TV[(age[x_2]+1)]
+  }
+  if(x_1<x_2){
+    probas_survie_homme<-TD[(age[x_1]+2):(omega+1)]/TD[(age[x_1]+1)]
+    probas_survie_femme<-c(TV[(age[x_2]+2):(omega+1)]/TV[(age[x_2]+1)],rep(0,age[x_2]-age[x_1]))
+  }
+  if(x_1==x_2){
+    probas_survie_homme<-TD[(age[x_1]+2):(omega+1)]/TD[(age[x_1]+1)]
+    probas_survie_femme<-TV[(age[x_2]+2):(omega+1)]/TV[(age[x_2]+1)]
+  }
+  return(Loyer*sum(actualisation*(probas_survie_homme+probas_survie_femme-probas_survie_homme*probas_survie_femme)))
+}
+
+Rente_2_T<-function(x_1,x_2){
+  Capital_rente<-500000-DUH_2_T(x_1,x_2)
+  x<-min(x_1,x_2)
+  actualisation<-cumprod(c(1,rep(v,omega-age[x])))
+  if(x_1>x_2){
+    probas_survie_homme<-c(TD[(age[x_1]+1):(omega+1)]/TD[(age[x_1]+1)],rep(0,age[x_1]-age[x_2]))
+    probas_survie_femme<-TV[(age[x_2]+1):(omega+1)]/TV[(age[x_2]+1)]
+  }
+  if(x_1<x_2){
+    probas_survie_homme<-TD[(age[x_1]+1):(omega+1)]/TD[(age[x_1]+1)]
+    probas_survie_femme<-c(TV[(age[x_2]+1):(omega+1)]/TV[(age[x_2]+1)],rep(0,age[x_2]-age[x_1]))
+  }
+  if(x_1==x_2){
+    probas_survie_homme<-TD[(age[x_1]+1):(omega+1)]/TD[(age[x_1]+1)]
+    probas_survie_femme<-TV[(age[x_2]+1):(omega+1)]/TV[(age[x_2]+1)]
+  }
+  return(Capital_rente/sum(actualisation*(probas_survie_homme+probas_survie_femme-probas_survie_homme*probas_survie_femme)))
+}
+
+#Quand on fait varier le crédirentier 1: (âge credirentier_2 fixe: 80 ans)
+Rente_2_var_1<-function(x){
+  return(Rente_2_T(x,5))
+}
+
+Rente_2_var_homme<-apply(matrix(seq(1,length(age)), nrow=length(age)), 1, Rente_2_var_1)
+
+#Quand on fait varier le crédirentier 2: (âge credirentier_1 fixe: 80 ans)
+
+Rente_2_var_2<-function(x){
+  return(Rente_2_T(5,x))
+}
+
+Rente_2_var_femme<-apply(matrix(seq(1,length(age)), nrow=length(age)), 1, Rente_2_var_2)
+
+```
+
+##Prime longévité sur une tête
+
+````{r}
+#détermination des paramètres n et u
+
+n_h=ceiling(esp_homme)+3
+n_f=ceiling(esp_femme)+3
+u=5
+
+#Pour la création du tableau regroupant les différents x_min et x_max dans le Mémoire, on les détermine ici: 
+
+x_min_homme<-age+n_h
+x_min_femme<-age+n_f
+x_max_homme<-x_min_homme+5
+x_max_femme<-x_min_femme+5
+
+
+#Prime Unique
+
+#On créer une matrice pour laquelle chaque colonne représente les facteurs d'actualisation v^k utilisés
+#dans la formule pour un âge du crédirentier, les âges allant de 60 à 100
+actu_1_femme<-matrix(rep(0,l*u), ncol=l)
+actu_1_homme<-matrix(rep(0,l*u), ncol=l)
+
+for (x in 1:l){
+  actu_1_femme[,x]<-cumprod(rep(v,u))*(v**(n_f[x]-1))
+  actu_1_homme[,x]<-cumprod(rep(v,u))*(v**(n_h[x]-1))
+}
+
+rente_1_femme<-numeric(l)
+rente_1_homme<-numeric(l)
+
+for (x in 1:l){
+  probas_survie_femme<-TV[(age[x]+n_f[x]+1):(age[x]+n_f[x]+u)] / TV[(age[x]+1)]
+  probas_survie_homme<-TD[(age[x]+n_h[x]+1):(age[x]+n_h[x]+u)] / TD[(age[x]+1)]
+  rente_1_femme[x]<-sum(probas_survie_femme*actu_1_femme[,x])
+  rente_1_homme[x]<-sum(probas_survie_homme*actu_1_homme[,x])
+}
+
+Prime_unique_1_femme<-Rente_1_femme*rente_1_femme
+Prime_unique_1_homme<-Rente_1_homme*rente_1_homme
+
+
+#Prime annuelle (on fixe le débirentier: homme de 40 ans)
+
+Denominateur_1_homme<-numeric(l)
+Denominateur_1_femme<-numeric(l)
+for (x in 1:length(age)){
+  actualisation_deno_homme<-cumprod(c(1,rep(v,n_h[x]-1)))
+  actualisation_deno_femme<-cumprod(c(1,rep(v,n_f[x]-1)))
+  L_cred_homme<-TD[(age[x]+1):(age[x]+n_h[x])] / TD[(age[x]+1)]
+  L_deb_homme<-TD[(40+1):(40+n_h[x])] / TD[(40+1)]
+  L_cred_femme<-TV[(age[x]+1):(age[x]+n_f[x])] / TV[(age[x]+1)]
+  L_deb_femme<-TD[(40+1):(40+n_f[x])] / TD[(40+1)]
+  Denominateur_1_homme[x]<-sum(L_cred_homme*L_deb_homme*actualisation_deno_homme)
+  Denominateur_1_femme[x]<-sum(L_cred_femme*L_deb_femme*actualisation_deno_femme)
+}
+
+Prime_annuelle_1_homme<-Prime_unique_1_homme/Denominateur_1_homme
+Prime_annuelle_1_femme<-Prime_unique_1_femme/Denominateur_1_femme
+```
+Graphiquement, on obtient
+```{r}
+plot(age, Prime_unique_1_homme, type="l", lwd=3, col='tomato3', main='Prime Unique risque longévité sur une tête - tables TD/TV89-90', xlab='âge du crédirentier', ylab = 'Prime unique', ylim=c(0,50000))
+lines(age, Prime_unique_1_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme', 'crédirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+
+plot(age, Prime_annuelle_1_homme, type="l", lwd=3, col='tomato3', main='Prime Annuelle risque longévité sur une tête - tables TD/TV89-90', xlab='âge du crédirentier', ylab = 'Prime annuelle', ylim=c(0,15000))
+lines(age, Prime_annuelle_1_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme', 'crédirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+```
+
+##Prime longévité sur deux têtes
+
+On commence par faire varier l'âge de Credirentier_1
+```{r}
+annee_naissance_2<-2022-80 #annee de naissance de la crédirentiere 
+annee_naissance_1<-annee_naissance
+
+#pour éviter les sorties de table, on peut rajouter des zéros pour avoir 122 lignes dans les tables
+
+nouv_TV<-c(TV, rep(0,11))
+nouv_TD<-c(TD, rep(0,11))
+
+#Prime unique
+
+maxi<-numeric(l)
+for (x in 1:l){
+  maxi[x]<-ceiling(max(esp_homme[x],esp_femme[5]))
+}
+m_h<-ceiling(maxi)+3
+
+#Pour la suite des calculs, il faut redéterminer les facteurs d'actualisation, car nous allons de m à m+u-1
+#et rien ne nous indique que m et n ont la même valeur 
+
+Actu_1<-matrix(rep(0,l*u), ncol=l)
+
+for (x in 1:l){
+  Actu_1[,x]<-cumprod(rep(v,u))*(v**(m_h[x]-1))
+}
+
+#On passe désormais au calcul des différentes composantes de la formule finale
+probas_survie_Homme_2_tetes<-matrix(rep(0, l*u),ncol=l) 
+probas_survie_femme_2_tetes<-matrix(rep(0, l*u),ncol=l) 
+
+for (x in 1:l){
+  probas_survie_Homme_2_tetes[,x]<-nouv_TD[(age[x]+1+m_h[x]):(age[x]+m_h[x]+u)] / nouv_TD[(age[x]+1)]
+  probas_survie_femme_2_tetes[,x]<-nouv_TV[(age[5]+1+m_h[x]):(age[5]+m_h[x]+u)] / nouv_TV[(age[5]+1)]
+}
+
+
+P_l<-(probas_survie_Homme_2_tetes+probas_survie_femme_2_tetes-probas_survie_Homme_2_tetes*probas_survie_femme_2_tetes)
+Prime_Unique_2_tetes_var_homme<-Rente_2_var_homme*colSums(P_l*Actu_1)
+
+
+#Prime annuelle
+
+#On détermine le dénominateur
+
+Denominateur_2_tetes_var_homme<-numeric(l)
+for (x in 1:length(age)){
+  actualisation_deno_homme<-cumprod(c(1,rep(v,m_h[x]-1)))
+  L_cred_homme<-nouv_TD[(age[x]+1):(age[x]+m_h[x])] / nouv_TD[(age[x]+1)]
+  L_deb_homme<-nouv_TD[(40+1):(40+m_h[x])] / nouv_TD[(40+1)]
+  L_cred_femme<-nouv_TV[(age[5]+1):(age[5]+m_h[x])] / nouv_TV[(age[5]+1)]
+  Denominateur_2_tetes_var_homme[x]<-sum((L_cred_homme+L_cred_femme-L_cred_homme*L_cred_femme)*L_deb_homme*actualisation_deno_homme)
+}
+
+Prime_annuelle_2_tetes_var_homme<-Prime_Unique_2_tetes_var_homme/Denominateur_2_tetes_var_homme
+
+```
+On fait dès à présent varier l'âge de Credirentier_2
+```{r}
+
+annee_naissance_1<-2022-80 #annee de naissance du crédirentier
+annee_naissance_2<-annee_naissance
+
+maxi_f<-numeric(l)
+for (x in 1:l){
+  maxi_f[x]<-ceiling(max(esp_homme[5],esp_femme[x]))
+}
+m_f<-ceiling(maxi_f)+3
+u<-5 
+
+#Pour la suite des calculs, il faut redéterminer les facteurs d'actualisation, car nous allons de m à m+u-1
+#et rien ne nous indique que m_f et m_h ont la même valeur 
+
+Actu_1_f<-matrix(rep(0,l*u), ncol=l)
+
+for (x in 1:l){
+  Actu_1_f[,x]<-cumprod(rep(v,u))*(v**(m_f[x]-1))
+}
+
+#On passe désormais au calcul des différentes composantes de la formule finale
+probas_survie_Femme_2_tetes<-matrix(rep(0, l*u),ncol=l)  
+for (x in 1:l){
+  probas_survie_Femme_2_tetes[,x]<-nouv_TV[(age[x]+1+m_f[x]):(age[x]+m_f[x]+u)] / nouv_TV[(age[x]+1)] 
+}
+probas_survie_homme_2_tetes<-matrix(rep(0, l*u),ncol=l) 
+for (x in 1:l){
+  probas_survie_homme_2_tetes[,x]<-nouv_TD[(age[5]+1+m_f[x]):(age[5]+m_f[x]+u)] / nouv_TD[(age[5]+1)]
+}
+
+P_l_f<-(probas_survie_Femme_2_tetes+probas_survie_homme_2_tetes-probas_survie_Femme_2_tetes*probas_survie_homme_2_tetes)
+Prime_Unique_2_tetes_var_femme<-Rente_2_var_femme*colSums(P_l_f*Actu_1_f)
+
+
+#Prime annuelle 
+
+#On détermine le dénominateur (ici il ne sera pas nécessaire d'agrandir la taille des tables initiales)
+
+Denominateur_2_tetes_var_femme<-numeric(l)
+for (x in 1:length(age)){
+  actualisation_deno_femme<-cumprod(c(1,rep(v,m_f[x]-1)))
+  L_cred_homme<-TD[(age[5]+1):(age[5]+m_f[x])] / TD[(age[5]+1)]
+  L_deb_homme<-TD[(40+1):(40+m_f[x])] / TD[(40+1)]
+  L_cred_femme<-TV[(age[x]+1):(age[x]+m_f[x])] / TV[(age[x]+1)]
+  Denominateur_2_tetes_var_femme[x]<-sum((L_cred_homme+L_cred_femme-L_cred_homme*L_cred_femme)*L_deb_homme*actualisation_deno_femme)
+}
+
+Prime_annuelle_2_tetes_var_femme<-Prime_Unique_2_tetes_var_femme/Denominateur_2_tetes_var_femme
+```
+Graphiquement, on obtient: 
+```{r}
+plot(age, Prime_Unique_2_tetes_var_homme, type="l", lwd=3, col='tomato3', main='Prime Unique risque longévité sur deux têtes - tables TD TV88-90', xlab='âge crédirentier', ylab = 'Prime unique', ylim=c(0,55000))
+lines(age, Prime_Unique_2_tetes_var_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme/ crédirentière 80 ans', 'crédirentier femme/ crédirentier 80 ans'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .02
+)
+
+plot(age, Prime_annuelle_2_tetes_var_homme, type="l", lwd=3, col='tomato3', main='Prime Annuelle risque longévité sur deux têtes - tables TD TV88-90', xlab='âge crédirentier', ylab = 'Prime annuelle', ylim=c(0,8000))
+lines(age, Prime_annuelle_2_tetes_var_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme/ crédirentière 80 ans', 'crédirentier femme/ crédirentier 80 ans'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+```
+##Prime risque décès 
+
+On commence par faire varier l'âge du débirentier de 40 à 75 ans. Le crédirentier est fixé. On considère qu'il s'agit d'un homme de 80 ans. 
+
+```{r}
+age_debirentier<-seq(40,75,5)
+t<-length(age_debirentier)
+annee_naissance_deb<-2022-age_debirentier
+```
+
+```{r}
+#Comme nous considérons un crédirentier fixe, nous pouvons aisément déterminer la Rente 
+R_deces_cred_fixe<-Rente_1_homme[5]
+
+#Prime Unique
+omega<-length(TD)-1 #age final
+
+proba_cred<-TD[(80+2):omega] / TD[(80+1)]
+actualisation<-cumprod(rep(v,(omega-80-1)))
+
+Probas_cum_inv<-rev(cumsum(rev(proba_cred*actualisation)))
+
+#On créer ensuite une matrice regroupant les probas de survie nécessaires pour chaque âge considéré
+#(une colonne correspondant à un âge)
+probas_deb_homme_1<-matrix(rep(0, t*(omega-80-1)),ncol=t) 
+probas_deb_homme_2<-matrix(rep(0, t*(omega-80-1)),ncol=t) 
+probas_deb_femme_1<-matrix(rep(0, t*(omega-80-1)),ncol=t) 
+probas_deb_femme_2<-matrix(rep(0, t*(omega-80-1)),ncol=t)
+for (x in 1:t){
+  probas_deb_homme_1[,x]<-TD[(age_debirentier[x]+1):(age_debirentier[x]+omega-80-1)] / TD[(age_debirentier[x]+1)]
+  probas_deb_homme_2[,x]<-TD[(age_debirentier[x]+2):(age_debirentier[x]+omega-80)] / TD[(age_debirentier[x]+1)]
+  probas_deb_femme_1[,x]<-TV[(age_debirentier[x]+1):(age_debirentier[x]+omega-80-1)] / TV[(age_debirentier[x]+1)]
+  probas_deb_femme_2[,x]<-TV[(age_debirentier[x]+2):(age_debirentier[x]+omega-80)] / TV[(age_debirentier[x]+1)]
+}
+
+probas_deb_homme<-probas_deb_homme_1-probas_deb_homme_2
+probas_deb_femme<-probas_deb_femme_1-probas_deb_femme_2
+
+Prime_unique_deces_cred_fixe_homme<-R_deces_cred_fixe*colSums(probas_deb_homme*Probas_cum_inv)
+Prime_unique_deces_cred_fixe_femme<-R_deces_cred_fixe*colSums(probas_deb_femme*Probas_cum_inv)
+
+#Prime annuelle
+
+#On détermine le dénominateur
+
+Denominateur_deces_cred_fixe_homme<-numeric(t)
+Denominateur_deces_cred_fixe_femme<-numeric(t)
+for (x in 1:t){
+  actualisation_deno_cred_fixe<-cumprod(c(1,rep(v,(omega-80-1))))
+  L_deb_homme<-TD[(age_debirentier[x]+1):(age_debirentier[x]+omega-80)] / TD[(age_debirentier[x]+1)]
+  L_cred_fixe<-TD[(80+1):omega] / TD[(80+1)]
+  L_deb_femme<-TV[(age_debirentier[x]+1):(age_debirentier[x]+omega-80)] / TV[(age_debirentier[x]+1)]
+  Denominateur_deces_cred_fixe_homme[x]<-sum(L_deb_homme*L_cred_fixe*actualisation_deno_cred_fixe)
+  Denominateur_deces_cred_fixe_femme[x]<-sum(L_deb_femme*L_cred_fixe*actualisation_deno_cred_fixe)
+}
+
+Prime_annuelle_deces_cred_fixe_homme<-Prime_unique_deces_cred_fixe_homme/Denominateur_deces_cred_fixe_homme
+Prime_annuelle_deces_cred_fixe_femme<-Prime_unique_deces_cred_fixe_femme/Denominateur_deces_cred_fixe_femme
+```
+Graphiquement, on obtient: 
+```{r}
+plot(age_debirentier, Prime_unique_deces_cred_fixe_homme, type="l", lwd=3, col='tomato3', main='Prime Unique risque décès - crédirentier fixe - tables  tables TD TV88-90', xlab='âge débirentier', ylab = 'Prime unique', ylim=c(0,100000))
+lines(age_debirentier, Prime_unique_deces_cred_fixe_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('débirentier homme', 'débirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+
+plot(age_debirentier, Prime_annuelle_deces_cred_fixe_homme, type="l", lwd=3, col='tomato3', main='Prime Annuelle risque décès - crédirentier fixe - tables TD TV88-90', xlab='âge débirentier', ylab = 'Prime annuelle', ylim=c(0,20000))
+lines(age_debirentier, Prime_annuelle_deces_cred_fixe_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('débrientier homme', 'débirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+
+```
+On peut désormais fixer l'âge du débirentier à 40 ans, et considérer qu'il s'agit d'un homme. On fait varier l'âge du crédirentier de 60 à 100 ans. 
+```{r}
+#Prime Unique (ici il y a clairement un pb)
+omega<-length(TD)-1
+
+#On s'occupe des termes qui contiennent les probabilités de survie du crédirentier 
+
+probabilites_credirentier_deces_H<-function(x){ #x correspond à l'indice dans le vecteur age
+  proba_cred<-TD[(age[x]+2):omega] / TD[(age[x]+1)]
+  actualisation<-cumprod(rep(v,(omega-age[x]-1)))
+  return(rev(cumsum(rev(proba_cred*actualisation))))
+}
+
+probabilites_credirentier_deces_F<-function(x){ #x correspond à l'indice dans le vecteur age
+  proba_cred<-TV[(age[x]+2):omega] / TV[(age[x]+1)]
+  actualisation<-cumprod(rep(v,(omega-age[x]-1)))
+  return(rev(cumsum(rev(proba_cred*actualisation))))
+}
+
+#On peut désormais passer aux probabilités de survie du crédirentier, en fonction des différents âges de crédirentier considéres
+
+Prime_unique_deces_deb_fixe_H<-function(x){
+  probas_deb_homme_1<-TD[(40+1):(40+omega-age[x]-1)] / TD[(40+1)]
+  probas_deb_homme_2<-TD[(40+2):(40+omega-age[x])] / TD[(40+1)]
+  probas_deb_homme<-probas_deb_homme_1-probas_deb_homme_2
+  Probas_cum_inv_deb_fixe<-probabilites_credirentier_deces_H(x)
+  return(Rente_1_homme[x]*sum(probas_deb_homme*Probas_cum_inv_deb_fixe))
+}
+
+Prime_unique_deces_deb_fixe_F<-function(x){
+  probas_deb_homme_1<-TD[(40+1):(40+omega-age[x]-1)] / TD[(40+1)]
+  probas_deb_homme_2<-TD[(40+2):(40+omega-age[x])] / TD[(40+1)]
+  probas_deb_homme<-probas_deb_homme_1-probas_deb_homme_2
+  Probas_cum_inv_deb_fixe<-probabilites_credirentier_deces_F(x)
+  return(Rente_1_femme[x]*sum(probas_deb_homme*Probas_cum_inv_deb_fixe))
+}
+
+Prime_unique_deces_deb_fixe_homme<-apply(matrix(seq(1,l), nrow=l), 1, Prime_unique_deces_deb_fixe_H)
+Prime_unique_deces_deb_fixe_femme<-apply(matrix(seq(1,l), nrow=l), 1, Prime_unique_deces_deb_fixe_F)
+
+#Prime annuelle 
+
+#On détermine le dénominateur
+
+Denominateur_deces_deb_fixe_homme<-numeric(l)
+Denominateur_deces_deb_fixe_femme<-numeric(l)
+for (x in 1:l){
+  actualisation_deno_deb_fixe<-cumprod(c(1,rep(v,(omega-age[x]-1))))
+  L_deb<-TD[(40+1):(40+omega-age[x])] / TD[(40+1)]
+  L_cred_homme<-TD[(age[x]+1):omega] / TD[(age[x]+1)]
+  L_cred_femme<-TV[(age[x]+1):omega] / TV[(age[x]+1)]
+  Denominateur_deces_deb_fixe_homme[x]<-sum(L_deb*L_cred_homme*actualisation_deno_deb_fixe)
+  Denominateur_deces_deb_fixe_femme[x]<-sum(L_deb*L_cred_femme*actualisation_deno_deb_fixe)
+}
+
+Prime_annuelle_deces_deb_fixe_homme<-Prime_unique_deces_deb_fixe_homme/Denominateur_deces_deb_fixe_homme
+Prime_annuelle_deces_deb_fixe_femme<-Prime_unique_deces_deb_fixe_femme/Denominateur_deces_deb_fixe_femme
+```
+Nous obtenons alors les graphiques suivants:
+```{r}
+plot(age, Prime_unique_deces_deb_fixe_homme, type="l", lwd=3, col='tomato3', main='Prime Unique risque décès - débirentier fixe - tables TD TV88-90', xlab='âge crédirentier', ylab = 'Prime unique', ylim=c(0,20000))
+lines(age, Prime_unique_deces_deb_fixe_femme, type="l", lwd=3, col='blue')
+legend(
+  'topright',
+  c('crédirentier homme', 'crédirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+
+
+plot(age, Prime_annuelle_deces_deb_fixe_homme, type="l", lwd=3, col='tomato3', main='Prime Annuelle risque décès - débirentier fixe - tables tables TD TV88-90', xlab='âge crédirentier', ylab = 'Prime ’', ylim=c(0,2000))
+lines(age, Prime_annuelle_deces_deb_fixe_femme, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme', 'crédirentier femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .05
+)
+```

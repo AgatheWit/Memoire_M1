@@ -1,0 +1,749 @@
+---
+title: "Prise en compte de la dépendance dans un modèle sur deux têtes"
+output: html_document
+date: "2022-2023"
+header-includes:
+   - \usepackage{pifont} 
+   - \usepackage{manfnt}
+   - \usepackage{mdframed}
+   - \usepackage{systeme}
+   - \usepackage{txfonts}
+   - \newcommand{\cH}{\mathcal{H}}
+---
+
+\vspace{5cm}
+\begin{center}
+\begin{Large}
+\underline{Formateur} : 
+\vspace{2cm}
+\end{Large}
+\end{center}
+
+\newpage
+
+#Packages
+
+```{r ,message=FALSE}
+library(readxl)
+```
+
+#On se place dans le bon 'Working Directory' et on vide notre environnement 
+```{r}
+rm(list=ls())
+setwd("~/Documents/Dauphine M1/Mémoire")
+```
+
+#Prise en compte de la dépendance dans le cadre d'un contrat viager sur deux têtes 
+
+Nous utiliserons au cours de ce document les mêmes notations que celles utilisées dans le cadre d'indépendance sur deux têtes. \\
+Comme nous avons pu le voir dans le mémoire, nous allons désormais considérer un effet de surmortalité chez le crédirentier 1 et un effet de sur-longévité chez le crédirentier 2. \\[0.2cm]
+
+Les tables TGH05/TGF05 étant plus adaptées à notre étude, les graphiques seront implémentés à partir de ces dernières. 
+```{r}
+Table_TG_H<-read_excel("TGH05_TGF05.xlsx", sheet = 2)
+Table_TG_F<-read_excel("TGH05_TGF05.xlsx", sheet = 1)
+matrice_TG_H<-as.matrix(Table_TG_H[2:123,2:107]) #on supprime les titres et la colonne des ages 
+matrice_TG_F<-as.matrix(Table_TG_F[2:123,2:107])
+```
+Commençons par définir les éléments dont nous aurons besoin par la suite 
+```{r}
+age<-seq(60,100,5)
+l=length(age)
+Omega<-length(matrice_TG_H[,1])-1
+v<-1/(1+0.02)
+Loyer<-15000
+u<-5 #durée d'intervention de l'assureur
+```
+##Détermination des différents paramètres
+
+Avant de déterminer les nouvelles primes, il est judicieux de choisir les paramètres de sorte à traduire ce que nous souhaitons observer, c'est-à-dire une surmortalité de 6 ans pour le crédirentier 1 et une sur-longévité de 1.5 ans pour le crédirentier 2. \\
+Commençons par installer les librairies nécessaires. 
+```{r}
+install.packages(pracma) #pour pouvoir avoir accès à linspace
+library(pracma)
+par(mfrow=c(1,2))
+```
+
+###Paramètre de durée 
+
+Commençons par déterminer $\alpha_1$ et $\alpha_2$. \\
+Pour $\alpha_1$, nous souhaitons obtenir un effet qui dure 6 ans. Pour cela, observons quel alpha permet au bout de 6 ans de retourner au probabilités de décès initiales. 
+```{r}
+alpha_1<-linspace(0,1,1000)
+plot(alpha_1, exp(-6*alpha_1), col='tomato3', main='détermination du paramètre alpha pour le crédirentier 1', lwd=3, type='l', xlab='alpha', ylab='exp(-6*alpha)')
+``` 
+D'après le graphique observé, nous pouvons prendre $\alpha_1=0.8$. \\
+Appliquons le même raisonnement pour déterminer $\alpha_2$. 
+```{r}
+alpha_2<-linspace(0,3.5,1000)
+plot(alpha_2, exp(-1.5*alpha_2), col='blue', main='détermination du paramètre alpha pour le crédirentier 2', lwd=3, type='l', xlab='alpha', ylab='exp(-1.5*alpha)')
+```
+Ici, nous pouvons donc prendre $\alpha_2=2.7$. 
+```{r}
+alpha_1<-0.8
+alpha_2<-2.7
+```
+
+###Paramètre de choc initial 
+
+Comme nous avons pu le voir, le choc initial est plus élevé lorsque nous considérons un effet de surmortalité que lorsque nous considérons un effet de sur-longévité. Commençons par arbitrairement choisir $\beta_1=0.15$ et $\beta_2=0.06$. Vérifions la cohérence de ces données. \\
+```{r}
+beta_1<-0.15
+beta_2<-(-0.06) #On observe une sur-longévité: les probabilités de décès diminuent
+```
+Pour observer l'effet de surmortalité, commençons par fixer l'âge du crédirentier 1 à 60 ans et l'âge du crédirentier 2 à 80 ans (des valeurs éloignées sont volontairement utilisées, bien qu'il ne s'agisse pas des couples les plus communs, lors de la détermination des rentes, c'est ces cas de figure qui pourraient poser le plus de problèmes). \\
+Comme les changements s'effectuent sur les probabilités de décès, on va par simplicité utiliser la table qui renvoie les probabilités de deces. On ajoute également les fonction nécessaires par la suite.  
+```{r}
+passage_probas_survie<-function(table){
+  premiere_ligne<-min(which(table != 0))
+  derniere_ligne<-max(which(table != 0))
+  new<-table
+  probas_survie<-c(1,table[(premiere_ligne+1): derniere_ligne]/table[premiere_ligne:(derniere_ligne-1)])
+  new[premiere_ligne:derniere_ligne]<-probas_survie
+  return(new)
+}
+
+matrice_probas_deces_Homme<-1-apply(matrice_TG_H, 2, passage_probas_survie)
+matrice_probas_deces_Femme<-1-apply(matrice_TG_F, 2, passage_probas_survie)
+
+#calcul de l'espérance résiduelle:
+
+esperance_residuelle_Lx<-function(age,table){
+  annee_naissance<-2022-age
+  omega<-length(table[,1])
+  esper<-apply(matrix(seq(1,length(age)), nrow=length(age)),1, function (x) sum(table[(age[x]+2):omega, (annee_naissance[x]-1899)] / table[(age[x]+1),(annee_naissance[x]-1899)]))
+  return(esper)
+}
+
+#calcul des tables modifiées
+tables_adaptees_Homme<-function(beta_1,alpha_1,age_1,age_2){
+  Omega<-length(matrice_probas_deces_Homme[,1])-1
+  colonne_table_1<-matrice_probas_deces_Homme[(age_1+2):(Omega+1),(2022-age_1-1899)]  
+  E_2<-ceiling(esperance_residuelle_Lx(age_2, matrice_TG_F))#estimation de Tx2
+  t_1<-seq(0,Omega-age_1-1)
+  m_1<-numeric(Omega-age_1)
+  for (x in 1:length(t_1)){
+    m_1[x]<-max(t_1[x]-E_2,0)
+  }
+  
+  probas_deces_mod_1<- colonne_table_1*(1+beta_1*exp(-alpha_1*m_1)*(1*(E_2<=t_1)))
+  probas_deces_mod_1<- probas_deces_mod_1*(1*(probas_deces_mod_1<=1))+1*(probas_deces_mod_1>1)
+  probas_survie_mod_1<- 1 - probas_deces_mod_1
+  return(probas_survie_mod_1)
+}
+
+tables_adaptees_Femme<-function(beta_2,alpha_2,age_1,age_2){
+  Omega<-length(matrice_probas_deces_Homme[,1])-1
+  colonne_table_2<-matrice_probas_deces_Femme[(age_2+2):(Omega+1),(2022-age_2-1899)] 
+  E_1<-ceiling(esperance_residuelle_Lx(age_1, matrice_TG_H))#estimation de Tx1
+  t_2<-seq(0,Omega-age_2-1)
+  m_2<-numeric(Omega-age_2)
+  for (x in 1:length(t_2)){
+    m_2[x]<-max(t_2[x]-E_1,0)
+  }
+  
+  probas_deces_mod_2<-colonne_table_2*(1+beta_2*exp(-alpha_2*m_2)*(1*(E_1<=t_2)))
+  probas_deces_mod_2<-probas_deces_mod_2*(1*(probas_deces_mod_2>0))
+  probas_survie_mod_2<-1 - probas_deces_mod_2
+  return(probas_survie_mod_2)
+}
+```
+
+```{r}
+age_1<-60
+age_2<-80
+dependance<-function(age_1,age_2){
+  probas_survie_mod_1<-tables_adaptees_Homme(beta_1,alpha_1,age_1,age_2)
+  probas_survie_mod_2<-tables_adaptees_Femme(beta_2,alpha_2,age_1,age_2)
+  
+  esperance_1<- sum(cumprod(probas_survie_mod_1)) #calcul de l'esperance de vie résiduelle du crédirentier_1   en prenant en compte la dépendance 
+  esperance_2<- sum(cumprod(probas_survie_mod_2)) #calcul de l'esperance de vie résiduelle du crédirentier_2   en prenant en compte la dépendance
+  return(c(esperance_1,esperance_2))
+}
+esperance_1<-dependance(age_1,age_2)[1]
+esperance_2<-dependance(age_1,age_2)[2]
+
+```
+On obtient des résultats cohérents, bien que sur ce genre de configuration, l'impact semble très limité. 
+```{r}
+print(esperance_2-esperance_residuelle_Lx(age_2, matrice_TG_F))
+print(esperance_residuelle_Lx(age_1, matrice_TG_H)-esperance_1)
+```
+Observons plus en détail la sur-longévité en observant dès à présent un crédirentier 1 de 80 ans et un crédirentier 2 de 60 ans. 
+```{r}
+esp_1<-dependance(80,60)[1]
+esp_2<-dependance(80,60)[2]
+```
+On observe également une différence, mais qui reste très limitée. 
+Essayons d'observer ce qui se passe pour un couple de crédirentiers qui ont des âges moins écartés. 
+```{r}
+print(esperance_residuelle_Lx(65, matrice_TG_H)-dependance(65,70)[1])
+print(dependance(65,70)[2]-esperance_residuelle_Lx(70, matrice_TG_F))
+```
+L'impact observé n'est toujours pas très important. \\
+Observons néanmoins les effets de la formule sur les probabilités de décès du crédirentier 1 et du crédirentier 2. \\
+Pour le crédirentier 1: On suppose un crédirentier 1 de 70 ans et un crédirentier 2 de 80 ans. 
+```{r}
+E_2<-ceiling(esperance_residuelle_Lx(80, matrice_TG_F))
+time_2<-seq(E_2-1,Omega-70-2)
+
+annee_1<-2022-70
+
+#On observe ces variations sur les temps h allant de E_2-1 à l'âge final
+
+probas_avant_ajust_homme<-matrice_probas_deces_Homme[(70+E_2+1):Omega, annee_1-1899]
+
+h_1<-c(0,0,seq(1,(Omega-70-2-E_2)))
+ajustement_homme<-1+beta_1*exp(-alpha_1*h_1)*(1*(E_2<=time_2))
+probas_apres_ajustement_homme<-probas_avant_ajust_homme*ajustement_homme
+```
+Nous observons ensuite la différence entre les deux probabilités de décès 
+```{r}
+plot(seq(-1,Omega-70-2-E_2), probas_apres_ajustement_homme-probas_avant_ajust_homme, col='tomato3', main='crédirentier 1', lwd=3, type='l', xlab='temps', ylab='probabilité actualisée - probabilité initiale')
+```
+Pour le crédirentier 2: Nous supposons inversement que le crédirentier 1 a 80 ans et que le crédirentier 2 a 70 ans 
+```{r}
+E_1<-ceiling(esperance_residuelle_Lx(80, matrice_TG_H))
+time_1<-seq(E_1-1,Omega-70-2)
+
+annee_2<-annee_1 
+
+#On observe ces variations sur les temps h allant de E_1-1 à l'âge final
+
+probas_avant_ajust_femme<-matrice_probas_deces_Femme[(70+E_1+1):Omega, annee_2-1899]
+
+h_2<-c(0,0,seq(1,(Omega-70-2-E_1)))
+ajustement_femme<-1+beta_2*exp(-alpha_2*h_2)*(1*(E_1<=time_1))
+probas_apres_ajustement_femme<-probas_avant_ajust_femme*ajustement_femme
+```
+Nous observons ensuite la différence entre les deux probas de décès
+```{r}
+plot(seq(-1,Omega-70-2-E_1), probas_apres_ajustement_femme-probas_avant_ajust_femme, col='blue', main='crédirentier 2', lwd=3, type='l', xlab='temps', ylab='probabilité actualisée - probabilité initiale')
+```
+##Mise en place de la formule
+On commence par déterminer la rente 
+```{r}
+Omega<-length(matrice_probas_deces_Homme[,1])-1 #On redéfinit l'âge final ici
+
+#Détermination du DUH 
+DUH_2_T_dep<-function(x_1,x_2,beta_1,beta_2){ #attention x_1 et x_2 ne représentent pas les âges mais la position de l'âge des individus considérés dans le vecteur 'age'
+  x<-min(x_1,x_2)
+  matrice_prob_H<-tables_adaptees_Homme(beta_1,alpha_1,age[x_1],age[x_2])
+  matrice_prob_F<-tables_adaptees_Femme(beta_2,alpha_2,age[x_1],age[x_2])
+  actualisation<-cumprod(rep(v,Omega-age[x]))
+  if(x_1>x_2){
+    probas_survie_homme<-c(apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k])),rep(0,age[x_1]-age[x_2])) #L'idée est d'obtenir des vecteurs de même taille, et une fois l'âge final dépassé, la probabilité de survie est nulle 
+    probas_survie_femme<-apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k]))
+  }
+  if(x_1<x_2){
+    probas_survie_homme<-apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k]))
+    probas_survie_femme<-c(apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k])),rep(0,age[x_2]-age[x_1]))
+  }
+  if(x_1==x_2){
+    probas_survie_homme<-apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k]))
+    probas_survie_femme<-apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k]))
+  }
+  return(Loyer*sum(actualisation*(probas_survie_homme+probas_survie_femme-probas_survie_homme*probas_survie_femme)))
+}
+
+Rente_2_T_dep<-function(x_1,x_2,beta_1,beta_2){
+  Capital_rente<-500000-DUH_2_T_dep(x_1,x_2,beta_1,beta_2)
+  matrice_prob_H<-tables_adaptees_Homme(beta_1,alpha_1,age[x_1],age[x_2])
+  matrice_prob_F<-tables_adaptees_Femme(beta_2,alpha_2,age[x_1],age[x_2])
+  x<-min(x_1,x_2)
+  actualisation<-cumprod(c(1,rep(v,Omega-age[x])))
+  if(x_1>x_2){
+    probas_survie_homme<-c(1, apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k])),rep(0,age[x_1]-age[x_2]))
+    probas_survie_femme<-c(1,apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k])))
+  }
+  if(x_1<x_2){
+    probas_survie_homme<-c(1,apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k])))
+    probas_survie_femme<-c(1,apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k])) ,rep(0,age[x_2]-age[x_1]))
+  }
+  if(x_1==x_2){
+    probas_survie_homme<-c(1,apply(matrix(seq(1,Omega-age[x_1]), nrow=Omega-age[x_1]), 1, function (k) prod(matrice_prob_H[1:k])))
+    probas_survie_femme<-c(1,apply(matrix(seq(1,Omega-age[x_2]), nrow=Omega-age[x_2]), 1, function (k) prod(matrice_prob_F[1:k])))
+  }
+  return(Capital_rente/sum(actualisation*(probas_survie_homme+probas_survie_femme-probas_survie_homme*probas_survie_femme)))
+}
+
+#Quand on fait varier le crédirentier 1:  (âge credirentier_2 fixe: 80 ans)
+Rente_2_var_1_dep<-function(x){
+  return(Rente_2_T_dep(x,5,beta_1,beta_2))
+}
+
+Rente_2_var_homme_dep<-apply(matrix(seq(1,length(age)), nrow=length(age)), 1, Rente_2_var_1_dep)
+
+#Quand on fait varier le crédirentier 2:  (âge credirentier_1 fixe: 80 ans)
+
+Rente_2_var_2_dep<-function(x){
+  return(Rente_2_T_dep(5,x, beta_1,beta_2))
+}
+
+Rente_2_var_femme_dep<-apply(matrix(seq(1,length(age)), nrow=length(age)), 1, Rente_2_var_2_dep)
+
+```
+On peut ensuite passer à la mise en place de la formule. 
+```{r}
+beta_1<-0.15 #On le redéfinit pour éviter toute confusion dans le code
+beta_2<--0.06 #idem
+
+formule_dependance<-function(x_1,x_2,beta_1,beta_2){
+  matrice_prob_H<-tables_adaptees_Homme(beta_1,alpha_1,age[x_1],age[x_2])
+  matrice_prob_F<-tables_adaptees_Femme(beta_2,alpha_2,age[x_1],age[x_2])
+  esperance_1<- sum(cumprod(matrice_prob_H)) #calcul de l'esperance de vie résiduelle du crédirentier_1 en prenant en compte la dépendance 
+  esperance_2<- sum(cumprod(matrice_prob_F)) #calcul de l'esperance de vie résiduelle du crédirentier_2 en prenant en compte la dépendance
+  
+  m<-ceiling(max(esperance_1,esperance_2))+3
+  
+  Rente_dep<-Rente_2_T_dep(x_1,x_2,beta_1,beta_2)
+  
+  probas_cred_1<- apply(matrix(seq(m,(m+u-1)), nrow=u),1, function(k) prod(matrice_prob_H[1:k]))
+  probas_cred_2<-apply(matrix(seq(m,(m+u-1)), nrow=u),1, function(k) prod(matrice_prob_F[1:k]))
+  
+  actualisation<-cumprod(rep(v,u))*(v**(m-1))
+  
+  Prime_dependance<-Rente_dep*sum((probas_cred_1+probas_cred_2-probas_cred_1*probas_cred_2)*actualisation)
+  return(Prime_dependance)
+}
+
+#On commence par faire varier l'age de credirentier_1
+formule_dependance_1<-function(age){
+  return(formule_dependance(age,5,beta_1,beta_2))
+}
+
+#Puis on fait varier l'age de credirentier_2
+formule_dependance_2<-function(age){
+  return(formule_dependance(5,age,beta_1,beta_2))
+}
+
+#Et on determine ensuite les primes associees
+Prime_dependance_1<-apply(matrix(seq(1,l),nrow=l), 1, formule_dependance_1)
+Prime_dependance_2<-apply(matrix(seq(1,l),nrow=l), 1, formule_dependance_2)
+```
+Graphiquement, en se plaçant dans le même cadre que le cas d'indépendance, nous pouvons observer: 
+```{r}
+plot(age, Prime_dependance_1, type="l", lwd=3, col='tomato3', main='Prime Unique risque longévité sur deux têtes - tables TGH05/TGF05 - Cas avec dépendance', xlab='âge crédirentier', ylab = 'Prime unique', ylim=c(0,40000))
+lines(age, Prime_dependance_2, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('crédirentier homme/ crédirentière 80 ans', 'crédirentier femme/ crédirentier 80 ans'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+Comparons les résultats obtenus avec l'étude dans le cas d'indépendance. 
+```{r}
+Prime_independance_1<-c(6141.800,8978.556,13911.191,24723.081,23919.201,21171.017,21091.887,21586.669,21886.736)
+Prime_independance_2<-c(4244.718,6203.588,10607.301,16238.232,23919.201,34144.241,29826.873,28967.014,29473.274)
+plot(age, Prime_dependance_1, type="l", lwd=3, col='tomato3', main='Prime Unique risque longévité sur deux têtes - tables TGH05/TGF05 - Cas avec dépendance', xlab='âge crédirentier', ylab = 'Prime unique', ylim=c(0,40000))
+lines(age, Prime_dependance_2, type="l", lwd=3, col='blue')
+lines(age, Prime_independance_1, type="l", lwd=3, col='firebrick1')
+lines(age, Prime_independance_2, type="l", lwd=3, col='powderblue')
+legend(
+  'topleft',
+  c('variation homme - dependance', 'variation femme - dependance', 'variation homme - independance', 'variation femme - independance'),
+  col = c('tomato3','blue','firebrick1','powderblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+A une telle échelle, on n'apperçoit pratiquement pas de différences. \\
+Essayons donc d'observer la différence en effectuant la différence entre les deux. 
+```{r}
+plot(age, Prime_independance_1-Prime_dependance_1, type="l", lwd=3, col='tomato3', main='Différence entre le cas de Dépendance et d\'Indépendance', xlab='âge crédirentier', ylab = 'Différence entre les Primes', ylim=c(0,350))
+lines(age, Prime_independance_2-Prime_dependance_2, type="l", lwd=3, col='blue')
+legend(
+  'topleft',
+  c('variation homme', 'variation femme'),
+  col = c('tomato3','blue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+##Etude de la sensibilité aux paramètres 
+
+Comme nous avons pu le voir, les paramètres choisis dans la partie précédente n'ont pas un grand impact sur les primes déterminées. Essayons d'observer le résultat obtenu en modifiant $\beta_1$ et $\beta_2$. Pour cela, fixons l'âge des crédirentiers 1 et 2, et observons les variations de primes en modifiant successivement le paramètre $\beta_1$ et $\beta_2$. \\
+
+###Variation de $\beta_1$
+Fixons l'âge du crédirentier 1 à 75 ans et celui du crédirentier 2 à 80 ans. \\
+Modifions les valeurs prises par $\beta_1$. 
+```{r}
+beta_variations<-c(0.15,0.30,0.45,0.60,0.75,0.9)
+```
+Passons à l'étude des effets de la formule sur les probabilités de décès du crédirentier 1, pendant une période de 10 ans, en commençant par l'année précédant le choc (ie le décès du crédirentier 2). \\
+```{r}
+E_2<-ceiling(esperance_residuelle_Lx(80, matrice_TG_F))
+time<-seq((E_2-1),(E_2+8))
+
+annee_1<-2022-75
+
+#On observe ces variations sur les temps h allant de E_2-1 à E_2+8
+
+variation_beta<-function(beta){
+  probas_avant_ajust_homme<-matrice_probas_deces_Homme[(75+E_2+1):(75+E_2+8+2), annee_1-1899]
+  h<-c(0,0,seq(1,8))
+  ajustement_homme<-1+beta*exp(-alpha_1*h)*(1*(E_2<=time))
+  probas_apres_ajustement_homme<-probas_avant_ajust_homme*ajustement_homme
+  return(probas_apres_ajustement_homme-probas_avant_ajust_homme)
+}
+
+#Graphiquement, on obtient: (le temps 0 correspond à l'instant où le choc se produit)
+
+plot(seq(-1,8), variation_beta(0.15), col='tomato3', main='crédirentier 1', lwd=3, type='l', xlab='temps', ylab='probabilité actualisée - probabilité initiale', ylim=c(0,0.12))
+lines(seq(-1,8), variation_beta(0.30), type="l", lwd=3, col='coral3')
+lines(seq(-1,8), variation_beta(0.45), type="l", lwd=3, col='coral')
+lines(seq(-1,8), variation_beta(0.60), type="l", lwd=3, col='darksalmon')
+lines(seq(-1,8), variation_beta(0.75), type="l", lwd=3, col='lightsalmon2')
+lines(seq(-1,8), variation_beta(0.9), type="l", lwd=3, col='lightsalmon')
+lines(seq(-1,8), variation_beta(1.05), type="l", lwd=3, col='mistyrose2')
+lines(seq(-1,8), variation_beta(1.20), type="l", lwd=3, col='papayawhip')
+lines(seq(-1,8), variation_beta(1.35), type="l", lwd=3, col='seashell')
+legend(
+  'topright',
+  c('0.15', '0.30', '0.45', '0.60','0.75','0.9','1.05','1.20','1.35'),
+  col = c('tomato3','coral3', 'coral', 'darksalmon','lightsalmon2','lightsalmon', 'mistyrose2','papayawhip','seashell'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+```
+Nous observons sans surprise que plus beta est élevé, plus les probabilités de décès sont augmentées par rapport à leur valeur initiale. Nous observons également un effet qui s'estompe au bout de 6 ans, la durée désirée. 
+```{r}
+age_1<-75
+age_2<-80
+
+formule_dependance_variation_beta<-function(beta_1,beta_2,x_1,x_2){
+  matrice_prob_H<-tables_adaptees_Homme(beta_1,0.8,age_1,age_2)
+  matrice_prob_F<-tables_adaptees_Femme(beta_2,2.7,age_1,age_2)
+  esperance_1<- sum(cumprod(matrice_prob_H)) #calcul de l'esperance de vie résiduelle du crédirentier_1 en prenant en compte la dépendance 
+  esperance_2<- sum(cumprod(matrice_prob_F)) #calcul de l'esperance de vie résiduelle du crédirentier_2 en prenant en compte la dépendance
+  
+  m<-ceiling(max(esperance_1,esperance_2))+3
+  
+  Rente_dep<-Rente_2_T_dep(x_1,x_2,beta_1,beta_2)
+  
+  probas_cred_1<- apply(matrix(seq(m,(m+u-1)), nrow=u),1, function(k) prod(matrice_prob_H[1:k]))
+  probas_cred_2<-apply(matrix(seq(m,(m+u-1)), nrow=u),1, function(k) prod(matrice_prob_F[1:k]))
+  
+  actualisation<-cumprod(rep(v,u))*(v**(m-1))
+  
+  Prime_dependance<-Rente_dep*sum((probas_cred_1+probas_cred_2-probas_cred_1*probas_cred_2)*actualisation)
+  return(Prime_dependance)
+}
+```
+Graphiquement, on obtient:
+```{r}
+betas<-linspace(0,1.35,200)
+prime<-apply(matrix(linspace(0,1.35,200),nrow=200),1, function(b) formule_dependance_variation_beta(b,-0.06,4,5))
+plot(betas, prime, col='red4', main='Prime Unique en fonction de beta_1', lwd=3, type='l', xlab='beta_1', ylab='Prime')
+
+age_1<-80
+age_2<-100
+prime_2<-apply(matrix(linspace(0,1.35,200),nrow=200),1, function(b) formule_dependance_variation_beta(b,-0.06,5,9))
+plot(betas, prime_2, col='red4', main='Prime Unique en fonction de beta_2', lwd=3, type='l', xlab='beta_1', ylab='Prime')
+```
+On observe une décroissance linéaire de la courbe de la prime: le paramètre $\beta_1$ est négativement correlé à la prime entre 0 et 1.23, puis 1.24 et 1.35. \\
+Déterminons désormais les primes en utilisant le même cadre que précédemment et en faisant varier $\beta_1$.
+```{r}
+formule_dependance_1_beta_1<-function(x,beta){
+  return(formule_dependance(x,5,beta,-0.06))
+}
+
+formule_dependance_2_beta_1<-function(x,beta){
+  return(formule_dependance(5,x,beta,-0.06))
+}
+
+#beta_1=0.30
+Prime_dependance_1_30<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,0.30))
+Prime_dependance_2_30<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,0.30))
+
+#beta_1=0.45
+Prime_dependance_1_45<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,0.45))
+Prime_dependance_2_45<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,0.45))
+
+#beta_1=0.60
+Prime_dependance_1_60<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,0.60))
+Prime_dependance_2_60<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,0.60))
+
+#beta_1=0.75
+Prime_dependance_1_75<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,0.75))
+Prime_dependance_2_75<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,0.75))
+
+#beta_1=0.90
+Prime_dependance_1_90<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,0.90))
+Prime_dependance_2_90<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,0.90))
+
+#beta_1=1.05
+Prime_dependance_1_105<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,1.05))
+Prime_dependance_2_105<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,1.05))
+
+#beta_1=1.20
+Prime_dependance_1_120<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,1.20))
+Prime_dependance_2_120<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,1.20))
+
+#beta_1=1.35
+Prime_dependance_1_135<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_1(x,1.35))
+Prime_dependance_2_135<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_1(x,1.35))
+
+#Graphiquement, on observe:
+plot(age, Prime_dependance_1, col='tomato3', main='Prime Unique en faisant varier l\'âge du crédirentier 1 - crédirentier 2: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique',ylim=c(5000,25000))
+lines(age, Prime_dependance_1_30, type="l", lwd=3, col='coral3')
+lines(age, Prime_dependance_1_75, type="l", lwd=3, col='coral')
+lines(age, Prime_dependance_1_105, type="l", lwd=3, col='darksalmon')
+lines(age, Prime_dependance_1_135, type="l", lwd=3, col='mistyrose2')
+legend(
+  'topleft',
+  c('0.15', '0.30','0.75','1.05','1.35'),
+  col = c('tomato3','coral3', 'coral', 'darksalmon','mistyrose2'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+plot(age, Prime_dependance_2, col='tomato3', main='Prime Unique en faisant varier l\'âge du crédirentier 2 - crédirentier 1: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique', ylim=c(5000,35000))
+lines(age, Prime_dependance_2_30, type="l", lwd=3, col='coral3')
+lines(age, Prime_dependance_2_75, type="l", lwd=3, col='coral')
+lines(age, Prime_dependance_2_105, type="l", lwd=3, col='darksalmon')
+lines(age, Prime_dependance_2_135, type="l", lwd=3, col='mistyrose2')
+legend(
+  'topleft',
+  c('0.15', '0.30','0.75','1.05','1.35'),
+  col = c('tomato3','coral3', 'coral', 'darksalmon','mistyrose2'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+```
+A cet échelle, on n'observe pas une variation énorme, mais nous pouvons tout de même constater que plus $\beta_1$ est grand, moins la prime est importante, sauf dans le cas où le crédirentier 1 est plus jeune que le crédirentier 2, résultat que nous interprétons dans le mémoire. 
+```{r}
+plot(age, Prime_dependance_1, col='tomato3', main='Prime Unique en faisant varier l\'âge du crédirentier 1 - crédirentier 2: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique',ylim=c(20000,25000), xlim=c(75,100))
+lines(age, Prime_dependance_1_30, type="l", lwd=3, col='coral3')
+lines(age, Prime_dependance_1_45, type="l", lwd=3, col='coral')
+lines(age, Prime_dependance_1_60, type="l", lwd=3, col='darksalmon')
+lines(age, Prime_dependance_1_75, type="l", lwd=3, col='lightsalmon2')
+lines(age, Prime_dependance_1_90, type="l", lwd=3, col='lightsalmon')
+lines(age, Prime_dependance_1_105, type="l", lwd=3, col='mistyrose2')
+lines(age, Prime_dependance_1_120, type="l", lwd=3, col='papayawhip')
+lines(age, Prime_dependance_1_135, type="l", lwd=3, col='seashell')
+legend(
+  'topright',
+  c('0.15', '0.30', '0.45', '0.60','0.75','0.9','1.05','1.20','1.35'),
+  col = c('tomato3','coral3', 'coral', 'darksalmon','lightsalmon2', 'lightsalmon','mistyrose2','papayawhip','seashell'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+plot(age, Prime_dependance_2, col='tomato3', main='Prime Unique en faisant varier l\'âge du crédirentier 2 - crédirentier 1: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique', ylim=c(25000,30000), xlim=c(80,100))
+lines(age, Prime_dependance_2_30, type="l", lwd=3, col='coral3')
+lines(age, Prime_dependance_2_45, type="l", lwd=3, col='coral')
+lines(age, Prime_dependance_2_60, type="l", lwd=3, col='darksalmon')
+lines(age, Prime_dependance_2_75, type="l", lwd=3, col='lightsalmon2')
+lines(age, Prime_dependance_2_90, type="l", lwd=3, col='lightsalmon')
+lines(age, Prime_dependance_2_105, type="l", lwd=3, col='mistyrose2')
+lines(age, Prime_dependance_2_120, type="l", lwd=3, col='papayawhip')
+lines(age, Prime_dependance_2_135, type="l", lwd=3, col='seashell')
+legend(
+  'topleft',
+  c('0.15', '0.30', '0.45', '0.60','0.75','0.9','1.05','1.20','1.35'),
+  col = c('tomato3','coral3', 'coral', 'darksalmon','lightsalmon2', 'lightsalmon','mistyrose2','papayawhip','seashell'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+
+###Variation de $\beta_2$
+Faisons une analyse similaire en fixant $\beta_1=0.15$ et en faisant varier $\beta_2$. \\
+Fixons l'âge du crédirentier 1 à 80 ans et celui du crédirentier 2 à 75 ans.
+```{r}
+beta_variations<--c(0.06,0.15,0.22,0.30,0.36)
+```
+Passons à l'étude des effets de la formule sur les probabilités de décès du crédirentier 1, pendant une période de 10 ans, en commençant par l'année précédant le choc (ie le décès du crédirentier 2). \\
+```{r}
+E_1<-ceiling(esperance_residuelle_Lx(80, matrice_TG_H))
+time_1<-seq(E_1-1,E_1+5)
+
+annee_2<-2022-75 
+
+#On observe ces variations sur les temps h allant de E_1-1 à E_1+5
+variation_beta_2<-function(beta){
+  probas_avant_ajust_femme<-matrice_probas_deces_Femme[(75+E_1+1):(75+E_1+2+5), annee_2-1899]
+  duree<-c(0,0,seq(1,5))
+  ajustement_femme<-1+beta*exp(-alpha_2*duree)*(1*(E_1<=time_1))
+  probas_apres_ajustement_femme<-probas_avant_ajust_femme*ajustement_femme
+  return(probas_apres_ajustement_femme-probas_avant_ajust_femme)
+}
+
+#Graphiquement, on obtient: (le temps 0 correspond à l'instant où le choc se produit)
+
+plot(seq(-1,5), variation_beta_2(-0.06), col='blue', main='crédirentier 2', lwd=3, type='l', xlab='temps', ylab='probabilité actualisée - probabilité initiale', ylim=c(-0.04,0))
+lines(seq(-1,5), variation_beta_2(-0.15), type="l", lwd=3, col='royalblue3')
+lines(seq(-1,5), variation_beta_2(-0.22), type="l", lwd=3, col='royalblue1')
+lines(seq(-1,5), variation_beta_2(-0.30), type="l", lwd=3, col='lightskyblue2')
+lines(seq(-1,5), variation_beta_2(-0.45), type="l", lwd=3, col='lightskyblue')
+lines(seq(-1,5), variation_beta_2(-0.60), type="l", lwd=3, col='lightsteelblue1')
+lines(seq(-1,5), variation_beta_2(-0.80), type="l", lwd=3, col='cadetblue1')
+lines(seq(-1,5), variation_beta_2(-1), type="l", lwd=3, col='aliceblue')
+legend(
+  'topright',
+  c('0.06', '0.15', '0.22', '0.30','0.40','0.60','0.80','1'),
+  col = c('blue','royalblue3', 'royalblue1', 'lightskyblue2','lightskyblue', 'lightsteelblue1','cadetblue1','aliceblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+Nous observons également sans surprise que plus beta est élevé (en valeur absolue), plus les probabilités de décès sont diminuées par rapport à leur valeur initiale. Nous observons également un effet qui s'estompe au bout de 2 ans.
+```{r}
+age_1<-80#on redéfinit age_1 et age_2 pour que les bons âges soient pris en compte dans la fonction 'fomule_dependance_variation_beta'
+age_2<-75
+betas<-linspace(-(1),0,200)
+prime<-apply(matrix(linspace(-(1),0,200),nrow=200),1, function(b) formule_dependance_variation_beta(0.15,b,5,4))
+plot(betas, prime, col='midnightblue', main='Prime Unique en fonction de beta_2', lwd=3, type='l', xlab='beta_2', ylab='Prime')
+
+betas_1<-linspace(-(1),-0.37,200)
+prime_1<-apply(matrix(linspace(-(1),-0.37,200),nrow=200),1, function(b) formule_dependance_variation_beta(0.15,b,5,4))
+plot(betas_1, prime_1, col='midnightblue', main='Prime Unique en fonction de beta_2', lwd=3, type='l', xlab='beta_2', ylab='Prime')
+
+betas_2<-linspace(-0.36,0,200)
+prime_2<-apply(matrix(linspace(-0.36,0,200),nrow=200),1, function(b) formule_dependance_variation_beta(0.15,b,5,4))
+plot(betas_2, prime_2, col='midnightblue', main='Prime Unique en fonction de beta_2', lwd=3, type='l', xlab='beta_2', ylab='Prime')
+```
+Nous pouvons constater que pour les variations allant de -1 à -0.37, et de -0.36 à 0, $\beta_2$ est négativement correlé à la prime, avec une prime qui néanmoins ne semble pas énormément varier. Il existe cependant une grande différence entre la prime pour $\beta_2=-0.37$ et $\beta_2=-0.36$. Après avoir étudié le code, nous pouvons observer que cette différence est due aux bornes m et m+u-1 qui varient en passant de -0.36 à -0.37. Ainsi la valeur $\sum_{k=m}^{m+u-1} v^k(_kp_{x_1}+_kp_{x_2}-_kp_{x_1}\times_kp_{x_2}) $ passe de 0.8484123 pour -0.37 à 1.024347, qui en multipliant par une rente qui ne varie pas beaucoup d'une valeur de $\beta_2$ à l'autre, engendre une prime qui varie beaucoup. Afin de ne pas constater cet effet dans notre interprétation, nous étudirons des valeurs de $\beta_2$ allant de 0 à -0.36 (ce choc devant de toute façon être inférieur au choc de surmortalité). Ainsi, contrairement au cas de surmortalité, plus le choc est important, plus la prime est importante.\\
+Déterminons désormais les primes en utilisant le même cadre que précédemment et en faisant varier $\beta_2$.
+```{r}
+formule_dependance_1_beta_2<-function(x,beta){
+  return(formule_dependance(x,5,0.15,beta))
+}
+
+formule_dependance_2_beta_2<-function(x,beta){
+  return(formule_dependance(5,x,0.15,beta))
+}
+
+#beta_2=-0.15
+Prime_dep_1_15<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.15))
+Prime_dep_2_15<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.15))
+
+#beta_2=-0.22
+Prime_dep_1_22<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.22))
+Prime_dep_2_22<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.22))
+
+#beta_2=-0.30
+Prime_dep_1_30<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.30))
+Prime_dep_2_30<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.30))
+
+#beta_2=-0.36
+Prime_dep_1_36<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.36))
+Prime_dep_2_36<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.36))
+
+#beta_2=-0.45
+Prime_dep_1_45<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.45))
+Prime_dep_2_45<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.45))
+
+#beta_2=-0.60
+Prime_dep_1_60<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.60))
+Prime_dep_2_60<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.60))
+
+#beta_2=-0.80
+Prime_dep_1_80<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-0.80))
+Prime_dep_2_80<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-0.80))
+
+#beta_2=-1
+Prime_dep_1_100<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_1_beta_2(x,-1))
+Prime_dep_2_100<-apply(matrix(seq(1,l),nrow=l), 1, function(x) formule_dependance_2_beta_2(x,-1))
+
+#Graphiquement, on observe:
+plot(age, Prime_dependance_1, col='blue', main='Prime Unique en faisant varier l\'âge du crédirentier 1 - crédirentier 2: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique',ylim=c(5000,25000))
+lines(age, Prime_dep_1_15, type="l", lwd=3, col='royalblue3')
+lines(age, Prime_dep_1_30, type="l", lwd=3, col='royalblue1')
+lines(age, Prime_dep_1_60, type="l", lwd=3, col='lightskyblue2')
+lines(age, Prime_dep_1_100, type="l", lwd=3, col='lightskyblue')
+legend(
+  'topleft',
+  c('0.06', '0.15', '0.30', '0.60','1'),
+  col = c('blue','royalblue3', 'royalblue1', 'lightskyblue2','lightskyblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+plot(age, Prime_dependance_2, col='blue', main='Prime Unique en faisant varier l\'âge du crédirentier 2 - crédirentier 1: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique', ylim=c(5000,35000))
+lines(age, Prime_dep_2_15, type="l", lwd=3, col='royalblue3')
+lines(age, Prime_dep_2_30, type="l", lwd=3, col='royalblue1')
+lines(age, Prime_dep_2_60, type="l", lwd=3, col='lightskyblue2')
+lines(age, Prime_dep_2_100, type="l", lwd=3, col='lightskyblue')
+legend(
+  'topleft',
+  c('0.06', '0.15', '0.30', '0.60','1'),
+  col = c('blue','royalblue3', 'royalblue1', 'lightskyblue2','lightskyblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+En observant à échelle plus réduite la courbe, nous obtenons:
+```{r}
+plot(age, Prime_dependance_1, col='blue', main='Prime Unique en faisant varier l\'âge du crédirentier 1 - crédirentier 2: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique',ylim=c(21000,22100), xlim=c(90,100))
+lines(age, Prime_dep_1_15, type="l", lwd=3, col='royalblue3')
+lines(age, Prime_dep_1_30, type="l", lwd=3, col='royalblue1')
+lines(age, Prime_dep_1_60, type="l", lwd=3, col='lightskyblue2')
+lines(age, Prime_dep_1_100, type="l", lwd=3, col='lightskyblue')
+legend(
+  'topleft',
+  c('0.06', '0.15', '0.30', '0.60','1'),
+  col = c('blue','royalblue3', 'royalblue1', 'lightskyblue2','lightskyblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+
+plot(age, Prime_dependance_2, col='blue', main='Prime Unique en faisant varier l\'âge du crédirentier 2 - crédirentier 1: 80 ans', lwd=3, type='l', xlab='temps', ylab='Prime Unique', ylim=c(500,25000), xlim=c(60,80))
+lines(age, Prime_dep_2_15, type="l", lwd=3, col='royalblue3')
+lines(age, Prime_dep_2_30, type="l", lwd=3, col='royalblue1')
+lines(age, Prime_dep_2_60, type="l", lwd=3, col='lightskyblue2')
+lines(age, Prime_dep_2_100, type="l", lwd=3, col='lightskyblue')
+legend(
+  'topleft',
+  c('0.06', '0.15', '0.30', '0.60','1'),
+  col = c('blue','royalblue3', 'royalblue1', 'lightskyblue2','lightskyblue'),
+  cex=0.9,
+  lwd = 3,
+  box.lty = 0,
+  bg = 'gray95',
+  inset = .03
+)
+```
+
+Nous pouvons faire des observations analogues à celles observées lorsque nous faisons varier $\beta_1$. Plus $\beta_2$ est grand (en valeur absolue), plus la prime est importante pour des âges proches. Lorsque le crédirentier 2 est plus jeune que le crédirentier 1, alors on observe une diminution de la prime pour des valeurs de $\beta_2$ élevées. 
