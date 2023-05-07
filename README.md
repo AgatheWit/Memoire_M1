@@ -11,4 +11,6 @@ Enfin, le code Dependance.Rmd correspond non pas au code utilisé pour le risque
 Risque de rente impayée 
 
 Les codes relatifs au risque de rente impayée sont les suivants: 
-- 
+- risque_Imp_code_durée_contrat.R
+- risque_Imp_code_proba_défaut.R
+- risque_Imp_code_vie_crédi.R
