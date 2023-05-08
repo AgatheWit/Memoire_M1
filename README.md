@@ -17,4 +17,5 @@ Les codes relatifs au risque de rente impayée sont les suivants:
 
 ## Risque de Dépendance
 
-Les codes relatifs au risque de Dépendance sont les suivants:
+Les codes relatif au risque de Dépendance est le suivant:
+- PRIME_RISQUE_DEP_sans_chargement.Rmd
